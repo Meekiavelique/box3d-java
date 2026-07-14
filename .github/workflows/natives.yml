@@ -1,0 +1,70 @@
+name: natives
+
+on:
+  push:
+    branches: [main, master]
+    paths: ['**', '.github/workflows/natives.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            lib: libbox3d.so
+          - os: windows-latest
+            target: windows-x64
+            lib: box3d.dll
+          - os: macos-14
+            target: macos-arm64
+            lib: libbox3d.dylib
+          - os: macos-13
+            target: macos-x64
+            lib: libbox3d.dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: configure
+        run: cmake -B native/box3d/build -S native/box3d -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBOX3D_DOUBLE_PRECISION=ON -DBOX3D_SAMPLES=OFF -DBOX3D_UNIT_TESTS=OFF
+      - name: build
+        run: cmake --build native/box3d/build --target box3d --config Release
+      - name: vhacd
+        run: |
+          cmake -B native/vhacd/build -S native/vhacd -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/vhacd/build --config Release
+      - name: stage
+        shell: bash
+        run: |
+          mkdir -p staged/${{ matrix.target }}
+          find native/box3d/build -name '${{ matrix.lib }}' -exec cp {} staged/${{ matrix.target }}/ \;
+          find native/vhacd/build \( -name 'libbkunvhacd.so' -o -name 'bkunvhacd.dll' -o -name 'libbkunvhacd.dylib' \) -exec cp {} staged/${{ matrix.target }}/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: natives-${{ matrix.target }}
+          path: staged
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: natives
+          merge-multiple: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - name: jar with all natives
+        run: ./gradlew jar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: box3d-java
+          path: build/libs/*.jar

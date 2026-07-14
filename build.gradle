@@ -1,0 +1,94 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'com.meekdev'
+version = project.version
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    withSourcesJar()
+}
+
+sourceSets.main.java.srcDir 'src/generated/java'
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    systemProperty 'bkun.box3d.library', findProperty('box3dLib') ?: "${projectDir}/natives/linux-x64/libbox3d.so"
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+
+def nativeDir = layout.projectDirectory.dir('native/box3d')
+def nativeOut = layout.projectDirectory.dir('natives/linux-x64')
+
+tasks.register('configureNative', Exec) {
+    workingDir nativeDir
+    commandLine 'cmake', '-B', 'build', '-G', 'Ninja',
+            '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=ON',
+            '-DBOX3D_DOUBLE_PRECISION=ON', '-DBOX3D_SAMPLES=OFF', '-DBOX3D_UNIT_TESTS=OFF'
+}
+
+tasks.register('configureVhacd', Exec) {
+    workingDir 'native/vhacd'
+    commandLine 'cmake', '-B', 'build', '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release'
+}
+
+tasks.register('buildVhacd', Exec) {
+    dependsOn 'configureVhacd'
+    workingDir 'native/vhacd'
+    commandLine 'cmake', '--build', 'build'
+    doLast {
+        copy {
+            from 'native/vhacd/build/libbkunvhacd.so'
+            into nativeOut
+        }
+    }
+}
+
+tasks.register('regenerateVhacdBindings', Exec) {
+    workingDir projectDir
+    commandLine "${System.getProperty('user.home')}/.local/jextract-25/bin/jextract",
+            '--output', 'src/generated/java',
+            '--target-package', 'com.meekdev.box3d.ffi.vhacd',
+            '-I', 'native/vhacd',
+            'native/vhacd/vhacd_wrapper.h'
+}
+
+tasks.register('buildNative', Exec) {
+    dependsOn 'configureNative'
+    workingDir nativeDir
+    commandLine 'cmake', '--build', 'build', '--target', 'box3d'
+    doLast {
+        copy {
+            from "${nativeDir}/build/bin/libbox3d.so"
+            into nativeOut
+        }
+    }
+}
+
+tasks.register('regenerateBindings', Exec) {
+    workingDir projectDir
+    commandLine "${System.getProperty('user.home')}/.local/jextract-25/bin/jextract",
+            '--output', 'src/generated/java',
+            '--target-package', 'com.meekdev.box3d.ffi',
+            '-DBOX3D_DOUBLE_PRECISION',
+            '-I', 'native/box3d/include',
+            'native/box3d/include/box3d/box3d.h'
+}
+
+// ship whatever natives have been built so the loader can pull them off the classpath
+jar {
+    from('natives') {
+        into 'natives'
+    }
+}

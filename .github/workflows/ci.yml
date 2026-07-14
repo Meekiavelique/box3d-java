@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: gradle
+      - name: install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: build natives
+        run: ./gradlew buildNative buildVhacd
+      - name: test
+        run: ./gradlew test
+      - name: upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: build/reports/tests/test

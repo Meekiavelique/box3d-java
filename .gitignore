@@ -1,0 +1,5 @@
+/build/
+/.gradle/
+/natives/
+native/box3d/build/
+native/vhacd/build/

@@ -1,4 +1,11 @@
-# box3d-java
+<h1 align="center">
+ box3d-java
+</h1>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
+  <a href="https://discord.gg/avSH2JTfef"><img src="https://img.shields.io/badge/Discord-online-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" />
+</p>
 
 [box3d](https://github.com/erincatto/box3d) for java, through the foreign and a thin wrapper on top makes it something you'd actually want to call. positions are double precision, so a world can get big without the far corners turning to jitter.
 

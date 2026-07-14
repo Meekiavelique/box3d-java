@@ -11,7 +11,7 @@
 
 java 25 or newer.
 
-## quick start
+## Quick start
 
 ```java
 try (B3World world = B3World.create(new Vec3(0, -10, 0))) {
@@ -31,7 +31,7 @@ yeah that's the whole shape of it. make a world, put bodies in it, step it.
 
 one rule worth knowing up front: a world belongs to the thread that created it, keep your calls on that thread. hand `B3World.create(gravity, workers)` a worker count and the solver fans out across a pool internally, but the api around it stays single threaded.
 
-## what implemented right now
+## What is implemented
 
 shapes are boxes, spheres, capsules, convex hulls, triangle meshes and height fields, plus static compounds that fuse a pile of primitives into one collider. friction, restitution, density, filters, sensors, all editable through `B3Shape` after the fact.
 
@@ -47,7 +47,7 @@ introspection runs both directions. take a shape and ask it its type, geometry, 
 
 and `B3Recording` with `B3Replay` capture a world and play it back.
 
-## what's not here
+## What is not implemented
 
 the wrapper covers every body, shape, joint and world method you actually reach for. a few are left out:
 

@@ -20,9 +20,6 @@ jobs:
           - os: macos-14
             target: macos-arm64
             lib: libbox3d.dylib
-          - os: macos-13
-            target: macos-x64
-            lib: libbox3d.dylib
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

@@ -15998,6 +15998,68 @@ public class box3d_h extends box3d_h_1 {
            throw new AssertionError("should not reach here", ex$);
         }
     }
+
+    private static class b3Contact_RestoreImpulses {
+        public static final FunctionDescriptor DESC = FunctionDescriptor.of(
+            box3d_h.C_INT,
+            b3ContactId.layout(),
+            box3d_h.C_POINTER,
+            box3d_h.C_INT
+        );
+
+        public static final MemorySegment ADDR = SYMBOL_LOOKUP.findOrThrow("b3Contact_RestoreImpulses");
+
+        public static final MethodHandle HANDLE = Linker.nativeLinker().downcallHandle(ADDR, DESC);
+    }
+
+    /**
+     * Function descriptor for:
+     * {@snippet lang=c :
+     * int b3Contact_RestoreImpulses(b3ContactId contactId, const b3Manifold *manifolds, int manifoldCount)
+     * }
+     */
+    public static FunctionDescriptor b3Contact_RestoreImpulses$descriptor() {
+        return b3Contact_RestoreImpulses.DESC;
+    }
+
+    /**
+     * Downcall method handle for:
+     * {@snippet lang=c :
+     * int b3Contact_RestoreImpulses(b3ContactId contactId, const b3Manifold *manifolds, int manifoldCount)
+     * }
+     */
+    public static MethodHandle b3Contact_RestoreImpulses$handle() {
+        return b3Contact_RestoreImpulses.HANDLE;
+    }
+
+    /**
+     * Address for:
+     * {@snippet lang=c :
+     * int b3Contact_RestoreImpulses(b3ContactId contactId, const b3Manifold *manifolds, int manifoldCount)
+     * }
+     */
+    public static MemorySegment b3Contact_RestoreImpulses$address() {
+        return b3Contact_RestoreImpulses.ADDR;
+    }
+
+    /**
+     * {@snippet lang=c :
+     * int b3Contact_RestoreImpulses(b3ContactId contactId, const b3Manifold *manifolds, int manifoldCount)
+     * }
+     */
+    public static int b3Contact_RestoreImpulses(MemorySegment contactId, MemorySegment manifolds, int manifoldCount) {
+        var mh$ = b3Contact_RestoreImpulses.HANDLE;
+        try {
+            if (TRACE_DOWNCALLS) {
+                traceDowncall("b3Contact_RestoreImpulses", contactId, manifolds, manifoldCount);
+            }
+            return (int)mh$.invokeExact(contactId, manifolds, manifoldCount);
+        } catch (Error | RuntimeException ex) {
+           throw ex;
+        } catch (Throwable ex$) {
+           throw new AssertionError("should not reach here", ex$);
+        }
+    }
     private static final long _POSIX_C_SOURCE = 202405L;
     /**
      * {@snippet lang=c :

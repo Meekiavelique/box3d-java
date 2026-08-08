@@ -14,6 +14,7 @@ import com.meekdev.box3d.ffi.box3d_h;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.util.function.LongPredicate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,7 +44,10 @@ public final class B3Mover implements AutoCloseable {
     private final float radius;
     private final float bottomCenterY;
     private int planeCount;
+    private static final LongPredicate ACCEPT_EVERY_BODY = bodyKey -> true;
+
     private long excludedBody;
+    private LongPredicate bodyFilter = ACCEPT_EVERY_BODY;
 
     public record Contact(B3Body body, Vec3 point, Vec3 normal) {}
 
@@ -106,7 +110,16 @@ public final class B3Mover implements AutoCloseable {
         }, arena);
 
         this.castFilterCallback = b3MoverFilterFcn.allocate((shapeId, ctx) ->
-                excludedBody == 0 || world.shapeBodyKey(shapeId) != excludedBody, arena);
+                accepts(world.shapeBodyKey(shapeId)), arena);
+    }
+
+    private boolean accepts(long bodyKey) {
+        return (excludedBody == 0 || bodyKey != excludedBody) && bodyFilter.test(bodyKey);
+    }
+
+    // reject bodies the caller wants the mover to pass through, one-way platforms for instance
+    public void setBodyFilter(LongPredicate filter) {
+        this.bodyFilter = filter == null ? ACCEPT_EVERY_BODY : filter;
     }
 
     // ignore this body in every query, use it for the mover's own mirrored capsule

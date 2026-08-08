@@ -11,7 +11,11 @@ import com.meekdev.box3d.ffi.b3ContactEndTouchEvent;
 import com.meekdev.box3d.ffi.b3ContactEvents;
 import com.meekdev.box3d.ffi.b3ContactHitEvent;
 import com.meekdev.box3d.ffi.b3Counters;
+import com.meekdev.box3d.ffi.b3CreateDebugShapeCallback;
 import com.meekdev.box3d.ffi.b3CustomFilterFcn;
+import com.meekdev.box3d.ffi.b3DebugDraw;
+import com.meekdev.box3d.ffi.b3DebugShape;
+import com.meekdev.box3d.ffi.b3DestroyDebugShapeCallback;
 import com.meekdev.box3d.ffi.b3DistanceJointDef;
 import com.meekdev.box3d.ffi.b3ExplosionDef;
 import com.meekdev.box3d.ffi.b3FilterJointDef;
@@ -44,7 +48,6 @@ import com.meekdev.box3d.ffi.b3WheelJointDef;
 import com.meekdev.box3d.ffi.b3WorldDef;
 import com.meekdev.box3d.ffi.b3WorldTransform;
 import com.meekdev.box3d.ffi.box3d_h;
-
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SegmentAllocator;
@@ -52,11 +55,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 
 public final class B3World implements AutoCloseable {
 
     private static final boolean DEBUG = Boolean.getBoolean("bkun.box3d.debug");
     private static final long SCRATCH_SIZE = 256;
+
+    private static final float DEBUG_BOUNDS_EXTENT = 1.0e6f;
 
     private final Arena arena;
     private final MemorySegment id;
@@ -66,6 +75,10 @@ public final class B3World implements AutoCloseable {
     private final Map<Long, B3Body> bodies = new HashMap<>();
     private final List<B3Body> overlapHits = new ArrayList<>();
     private final MemorySegment overlapStub;
+    private final Map<Long, float[]> debugOutlines = new HashMap<>();
+    private final float[] rotated = new float[3];
+    private final AtomicLong nextOutlineId =
+            new AtomicLong(1L);
     private boolean closed;
 
     private B3World(Arena arena, MemorySegment id, B3TaskSystem tasks) {
@@ -92,6 +105,20 @@ public final class B3World implements AutoCloseable {
 
         Arena arena = Arena.ofConfined();
         MemorySegment def = box3d_h.b3DefaultWorldDef(arena);
+        AtomicReference<B3World> pending =
+                new AtomicReference<>();
+        b3WorldDef.createDebugShape(def, b3CreateDebugShapeCallback.allocate(
+                (debugShape, context) -> {
+                    B3World created = pending.get();
+                    return created == null ? MemorySegment.NULL : created.registerOutline(debugShape);
+                }, arena));
+        b3WorldDef.destroyDebugShape(def, b3DestroyDebugShapeCallback.allocate(
+                (userShape, context) -> {
+                    B3World created = pending.get();
+                    if (created != null) {
+                        created.debugOutlines.remove(userShape.address());
+                    }
+                }, arena));
         MemorySegment gravitySeg = b3Vec3.allocate(arena);
         b3Vec3.x(gravitySeg, (float) gravity.x());
         b3Vec3.y(gravitySeg, (float) gravity.y());
@@ -107,22 +134,24 @@ public final class B3World implements AutoCloseable {
         }
 
         MemorySegment id = box3d_h.b3CreateWorldDoublePrecision(arena, def);
-        return new B3World(arena, id, tasks);
+        B3World created = new B3World(arena, id, tasks);
+        pending.set(created);
+        return created;
     }
 
-    private final List<java.util.function.Consumer<B3Events.ContactBegin>> beginListeners = new ArrayList<>();
-    private final List<java.util.function.Consumer<B3Events.ContactHit>> hitListeners = new ArrayList<>();
+    private final List<Consumer<B3Events.ContactBegin>> beginListeners = new ArrayList<>();
+    private final List<Consumer<B3Events.ContactHit>> hitListeners = new ArrayList<>();
 
-    public void onContactBegin(java.util.function.Consumer<B3Events.ContactBegin> listener) {
+    public void onContactBegin(Consumer<B3Events.ContactBegin> listener) {
         beginListeners.add(listener);
     }
 
-    public void onContactHit(java.util.function.Consumer<B3Events.ContactHit> listener) {
+    public void onContactHit(Consumer<B3Events.ContactHit> listener) {
         hitListeners.add(listener);
     }
 
     // pairs the callback rejects never collide, evaluated when contacts are created
-    public void setContactFilter(java.util.function.BiPredicate<B3Body, B3Body> filter) {
+    public void setContactFilter(BiPredicate<B3Body, B3Body> filter) {
         checkThread();
         MemorySegment stub = b3CustomFilterFcn.allocate((shapeA, shapeB, ctx) -> {
             B3Body a = bodyByKey(shapeBodyKey(shapeA));
@@ -166,6 +195,131 @@ public final class B3World implements AutoCloseable {
                     new Vec3(b3Vec3.x(normal), b3Vec3.y(normal), b3Vec3.z(normal)));
         }, arena);
         box3d_h.b3World_SetPreSolveCallback(id, stub, MemorySegment.NULL);
+    }
+
+    private MemorySegment registerOutline(MemorySegment debugShape) {
+        float[] outline = B3ShapeOutline.build(
+                debugShape.reinterpret(b3DebugShape.layout().byteSize()));
+        if (outline.length == 0) {
+            return MemorySegment.NULL;
+        }
+        long id = nextOutlineId.getAndIncrement();
+        debugOutlines.put(id, outline);
+        return MemorySegment.ofAddress(id);
+    }
+
+    public void drawDebug(B3DebugDraw sink) {
+        checkThread();
+        if (closed) {
+            return;
+        }
+        try (Arena temp = Arena.ofConfined()) {
+            MemorySegment draw = buildDebugDraw(temp, sink);
+            box3d_h.b3World_Draw(id, draw, -1L);
+        }
+    }
+
+    private MemorySegment buildDebugDraw(Arena temp, B3DebugDraw sink) {
+        MemorySegment draw = box3d_h.b3DefaultDebugDraw(temp);
+        b3DebugDraw.DrawShapeFcn(draw,
+                b3DebugDraw.DrawShapeFcn.allocate(
+                        (userShape, transform, color, context) ->
+                                forwardShape(sink, userShape, transform, color), temp));
+        b3DebugDraw.DrawSegmentFcn(draw,
+                b3DebugDraw.DrawSegmentFcn.allocate(
+                        (start, end, color, context) -> sink.segment(
+                                b3Vec3.x(start), b3Vec3.y(start), b3Vec3.z(start),
+                                b3Vec3.x(end), b3Vec3.y(end), b3Vec3.z(end), color), temp));
+        b3DebugDraw.DrawPointFcn(draw,
+                b3DebugDraw.DrawPointFcn.allocate(
+                        (position, size, color, context) -> sink.point(
+                                b3Vec3.x(position), b3Vec3.y(position), b3Vec3.z(position),
+                                size, color), temp));
+        b3DebugDraw.DrawSphereFcn(draw,
+                b3DebugDraw.DrawSphereFcn.allocate(
+                        (center, radius, color, alpha, context) -> sink.sphere(
+                                b3Vec3.x(center), b3Vec3.y(center), b3Vec3.z(center),
+                                radius, color), temp));
+        b3DebugDraw.DrawCapsuleFcn(draw,
+                b3DebugDraw.DrawCapsuleFcn.allocate(
+                        (start, end, radius, color, alpha, context) -> sink.capsule(
+                                b3Vec3.x(start), b3Vec3.y(start), b3Vec3.z(start),
+                                b3Vec3.x(end), b3Vec3.y(end), b3Vec3.z(end),
+                                radius, color), temp));
+        b3DebugDraw.DrawBoxFcn(draw,
+                b3DebugDraw.DrawBoxFcn.allocate(
+                        (halfExtents, transform, color, context) -> forwardBox(sink,
+                                halfExtents, transform, color), temp));
+        applyDebugFlags(draw, sink.flags());
+        applyDrawingBounds(draw);
+        return draw;
+    }
+
+    private boolean forwardShape(B3DebugDraw sink, MemorySegment userShape,
+                                 MemorySegment transform, int color) {
+        float[] outline = debugOutlines.get(userShape.address());
+        if (outline == null) {
+            return true;
+        }
+        MemorySegment position = b3WorldTransform.p(transform);
+        MemorySegment axis = b3Quat.v(b3WorldTransform.q(transform));
+        float originX = (float) b3Pos.x(position);
+        float originY = (float) b3Pos.y(position);
+        float originZ = (float) b3Pos.z(position);
+        float qx = b3Vec3.x(axis);
+        float qy = b3Vec3.y(axis);
+        float qz = b3Vec3.z(axis);
+        float qw = b3Quat.s(b3WorldTransform.q(transform));
+        for (int index = 0; index + 5 < outline.length; index += 6) {
+            rotate(outline[index], outline[index + 1], outline[index + 2], qx, qy, qz, qw, rotated);
+            float startX = originX + rotated[0];
+            float startY = originY + rotated[1];
+            float startZ = originZ + rotated[2];
+            rotate(outline[index + 3], outline[index + 4], outline[index + 5], qx, qy, qz, qw, rotated);
+            sink.segment(startX, startY, startZ,
+                    originX + rotated[0], originY + rotated[1], originZ + rotated[2], color);
+        }
+        return true;
+    }
+
+    private static void rotate(float x, float y, float z, float qx, float qy, float qz, float qw,
+                               float[] destination) {
+        float tx = 2.0f * (qy * z - qz * y);
+        float ty = 2.0f * (qz * x - qx * z);
+        float tz = 2.0f * (qx * y - qy * x);
+        destination[0] = x + qw * tx + (qy * tz - qz * ty);
+        destination[1] = y + qw * ty + (qz * tx - qx * tz);
+        destination[2] = z + qw * tz + (qx * ty - qy * tx);
+    }
+
+    private static void forwardBox(B3DebugDraw sink, MemorySegment halfExtents,
+                                   MemorySegment transform, int color) {
+        MemorySegment position = b3WorldTransform.p(transform);
+        MemorySegment axis = b3Quat.v(b3WorldTransform.q(transform));
+        sink.box(b3Vec3.x(halfExtents), b3Vec3.y(halfExtents), b3Vec3.z(halfExtents),
+                (float) b3Pos.x(position), (float) b3Pos.y(position), (float) b3Pos.z(position),
+                b3Vec3.x(axis), b3Vec3.y(axis), b3Vec3.z(axis),
+                b3Quat.s(b3WorldTransform.q(transform)), color);
+    }
+
+    private static void applyDrawingBounds(MemorySegment draw) {
+        MemorySegment bounds = b3DebugDraw.drawingBounds(draw);
+        MemorySegment lower = b3AABB.lowerBound(bounds);
+        MemorySegment upper = b3AABB.upperBound(bounds);
+        b3Vec3.x(lower, -DEBUG_BOUNDS_EXTENT);
+        b3Vec3.y(lower, -DEBUG_BOUNDS_EXTENT);
+        b3Vec3.z(lower, -DEBUG_BOUNDS_EXTENT);
+        b3Vec3.x(upper, DEBUG_BOUNDS_EXTENT);
+        b3Vec3.y(upper, DEBUG_BOUNDS_EXTENT);
+        b3Vec3.z(upper, DEBUG_BOUNDS_EXTENT);
+    }
+
+    private static void applyDebugFlags(MemorySegment draw, B3DebugFlags flags) {
+        b3DebugDraw.drawShapes(draw, flags.shapes());
+        b3DebugDraw.drawJoints(draw, flags.joints());
+        b3DebugDraw.drawBounds(draw, flags.bounds());
+        b3DebugDraw.drawContacts(draw, flags.contacts());
+        b3DebugDraw.drawContactNormals(draw, flags.contactNormals());
     }
 
     public void step(float dt, int substeps) {

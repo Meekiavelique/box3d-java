@@ -3,3 +3,7 @@
 /natives/
 native/box3d/build/
 native/vhacd/build/
+
+# grafted into the submodule by graftRollbackSources; the tracked copies live in native/rollback
+native/box3d/src/rollback.c
+native/box3d/include/box3d/box3d_rollback.h

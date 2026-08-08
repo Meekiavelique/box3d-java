@@ -4,6 +4,8 @@ import com.meekdev.box3d.ffi.b3AABB;
 import com.meekdev.box3d.ffi.b3BoxHull;
 import com.meekdev.box3d.ffi.b3Capsule;
 import com.meekdev.box3d.ffi.b3ContactData;
+import com.meekdev.box3d.ffi.rollback.box3d_rollback_h;
+import com.meekdev.box3d.ffi.b3Manifold;
 import com.meekdev.box3d.ffi.b3Filter;
 import com.meekdev.box3d.ffi.b3JointId;
 import com.meekdev.box3d.ffi.b3MassData;
@@ -434,6 +436,37 @@ public final class B3Body {
             }
             return others;
         }
+    }
+
+    /// How long this body has been eligible for sleep. Paired with {@link #awake()} this is the sleep
+    /// state a rollback has to put back, since restoring pose and velocity alone lets a body fall asleep
+    /// or wake at a different step than it did the first time through.
+    public float sleepTime() {
+        return box3d_rollback_h.b3Body_GetSleepTime(id);
+    }
+
+    public void setSleepTime(float sleepTime) {
+        box3d_rollback_h.b3Body_SetSleepTime(id, sleepTime);
+    }
+
+    /// Snapshots the warm starting impulses of every contact on this body so a replay can put them back.
+    /// The caller owns the result and must close it.
+    public B3ContactImpulses saveContactImpulses() {
+        B3ContactImpulses saved = new B3ContactImpulses();
+        int capacity = box3d_h.b3Body_GetContactCapacity(id);
+        if (capacity <= 0) {
+            return saved;
+        }
+        try (Arena temp = Arena.ofConfined()) {
+            MemorySegment array = b3ContactData.allocateArray(capacity, temp);
+            int count = box3d_h.b3Body_GetContactData(id, array, capacity);
+            for (int i = 0; i < count; i++) {
+                MemorySegment data = b3ContactData.asSlice(array, i);
+                saved.record(b3ContactData.contactId(data), b3ContactData.manifolds(data),
+                        b3ContactData.manifoldCount(data), b3Manifold.sizeof());
+            }
+        }
+        return saved;
     }
 
     // nearest point on this body to a world target

@@ -39,7 +39,34 @@ test {
 def nativeDir = layout.projectDirectory.dir('native/box3d')
 def nativeOut = layout.projectDirectory.dir('natives/linux-x64')
 
+// native/box3d is a submodule, so anything left sitting in it is one git clean from gone. ours live
+// in native/rollback and get copied in before cmake runs.
+tasks.register('graftRollbackSources') {
+    def sourceDir = file('native/rollback')
+    def targetDir = file(nativeDir)
+    inputs.dir sourceDir
+    outputs.files "${nativeDir}/src/rollback.c", "${nativeDir}/include/box3d/box3d_rollback.h"
+    doLast {
+        // include and src only, copying the lot drops our readme on top of upstream's
+        copy {
+            from "${sourceDir}/include"
+            into "${targetDir}/include"
+        }
+        copy {
+            from "${sourceDir}/src"
+            into "${targetDir}/src"
+        }
+        def listing = file("${nativeDir}/src/CMakeLists.txt")
+        def text = listing.text
+        if (!text.contains('rollback.c')) {
+            listing.text = text.replace('\tcontact.c\n', '\tcontact.c\n\trollback.c\n')
+            logger.lifecycle('[box3d] added rollback.c to the box3d source listing')
+        }
+    }
+}
+
 tasks.register('configureNative', Exec) {
+    dependsOn 'graftRollbackSources'
     workingDir nativeDir
     commandLine 'cmake', '-B', 'build', '-G', 'Ninja',
             '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=ON',
@@ -82,6 +109,18 @@ tasks.register('buildNative', Exec) {
             into nativeOut
         }
     }
+}
+
+// own header, own jextract run, own package, so an upstream sync can't conflict with it
+tasks.register('regenerateRollbackBindings', Exec) {
+    dependsOn 'graftRollbackSources'
+    workingDir projectDir
+    commandLine "${System.getProperty('user.home')}/.local/jextract-25/bin/jextract",
+            '--output', 'src/generated/java',
+            '--target-package', 'com.meekdev.box3d.ffi.rollback',
+            '-DBOX3D_DOUBLE_PRECISION',
+            '-I', 'native/box3d/include',
+            'native/box3d/include/box3d/box3d_rollback.h'
 }
 
 tasks.register('regenerateBindings', Exec) {

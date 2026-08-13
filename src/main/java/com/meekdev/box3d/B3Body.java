@@ -4,6 +4,7 @@ import com.meekdev.box3d.ffi.b3AABB;
 import com.meekdev.box3d.ffi.b3BoxHull;
 import com.meekdev.box3d.ffi.b3Capsule;
 import com.meekdev.box3d.ffi.b3ContactData;
+import com.meekdev.box3d.ffi.b3ManifoldPoint;
 import com.meekdev.box3d.ffi.rollback.box3d_rollback_h;
 import com.meekdev.box3d.ffi.b3Manifold;
 import com.meekdev.box3d.ffi.b3Filter;
@@ -435,6 +436,65 @@ public final class B3Body {
                 }
             }
             return others;
+        }
+    }
+
+    /// A single touching point of a contact, in world space, with the surface normal pointing out of
+    /// the other body. Box3D fills a manifold for every touching pair every step, but nothing read it
+    /// out until now, so callers had to make do with the bodies alone.
+    public record ContactPoint(B3Body other, Vec3 point, Vec3 normal, float separation,
+                               float normalImpulse) {
+    }
+
+    public List<ContactPoint> contactPoints() {
+        int capacity = box3d_h.b3Body_GetContactCapacity(id);
+        if (capacity <= 0) {
+            return List.of();
+        }
+        try (Arena temp = Arena.ofConfined()) {
+            MemorySegment array = b3ContactData.allocateArray(capacity, temp);
+            int count = box3d_h.b3Body_GetContactData(id, array, capacity);
+            List<ContactPoint> points = new ArrayList<>();
+            for (int index = 0; index < count; index++) {
+                collectContact(b3ContactData.asSlice(array, index), points);
+            }
+            return points;
+        }
+    }
+
+    private void collectContact(MemorySegment data, List<ContactPoint> into) {
+        B3Body a = world.bodyByKey(world.shapeBodyKey(b3ContactData.shapeIdA(data)));
+        B3Body b = world.bodyByKey(world.shapeBodyKey(b3ContactData.shapeIdB(data)));
+        B3Body other = this == a ? b : a;
+        if (other == null) {
+            return;
+        }
+        boolean selfIsA = this == a;
+        MemorySegment manifolds = b3ContactData.manifolds(data);
+        int manifoldCount = b3ContactData.manifoldCount(data);
+        for (int index = 0; index < manifoldCount; index++) {
+            collectManifold(b3Manifold.asSlice(manifolds, index), other, selfIsA, into);
+        }
+    }
+
+    private void collectManifold(MemorySegment manifold, B3Body other, boolean selfIsA,
+                                 List<ContactPoint> into) {
+        MemorySegment normalSegment = b3Manifold.normal(manifold);
+        Vec3 normal = new Vec3(b3Vec3.x(normalSegment), b3Vec3.y(normalSegment), b3Vec3.z(normalSegment));
+        Vec3 outward = selfIsA ? normal : new Vec3(-normal.x(), -normal.y(), -normal.z());
+        MemorySegment points = b3Manifold.points(manifold);
+        int pointCount = b3Manifold.pointCount(manifold);
+        Vec3 origin = selfIsA ? position() : other.position();
+        for (int index = 0; index < pointCount; index++) {
+            MemorySegment point = b3ManifoldPoint.asSlice(points, index);
+            MemorySegment anchor = selfIsA ? b3ManifoldPoint.anchorA(point) : b3ManifoldPoint.anchorB(point);
+            into.add(new ContactPoint(other,
+                    new Vec3(origin.x() + b3Vec3.x(anchor),
+                            origin.y() + b3Vec3.y(anchor),
+                            origin.z() + b3Vec3.z(anchor)),
+                    outward,
+                    b3ManifoldPoint.separation(point),
+                    b3ManifoldPoint.normalImpulse(point)));
         }
     }
 

@@ -88,7 +88,7 @@ public final class B3Mover implements AutoCloseable {
 
         // one upcall stub each for the mover's lifetime, never allocated per move
         this.planeCallback = b3PlaneResultFcn.allocate((shapeId, results, count, ctx) -> {
-            if (excludedBody != 0 && world.shapeBodyKey(shapeId) == excludedBody) {
+            if (!accepts(world.shapeBodyKey(shapeId))) {
                 return true;
             }
             for (int i = 0; i < count && planeCount < PLANE_CAPACITY; i++) {

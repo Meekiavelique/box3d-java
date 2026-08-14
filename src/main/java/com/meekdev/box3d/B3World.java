@@ -669,25 +669,17 @@ public final class B3World implements AutoCloseable {
 
     // sweep a sphere through the world and keep the first thing it touches
     public ShapeHit castSphereClosest(Vec3 origin, float radius, Vec3 translation, B3Filter filter) {
+        return castShapeClosest(origin, List.of(Vec3.zero), radius, translation, filter);
+    }
+
+    // sweep a convex point cloud, points relative to origin, radius rounds it off
+    public ShapeHit castShapeClosest(Vec3 origin, List<Vec3> points, float radius, Vec3 translation,
+                                     B3Filter filter) {
         checkThread();
         try (Arena temp = Arena.ofConfined()) {
-            MemorySegment center = b3Vec3.allocate(temp);
-            b3Vec3.x(center, 0);
-            b3Vec3.y(center, 0);
-            b3Vec3.z(center, 0);
-            MemorySegment proxy = temp.allocate(b3ShapeProxy.layout());
-            b3ShapeProxy.points(proxy, center);
-            b3ShapeProxy.count(proxy, 1);
-            b3ShapeProxy.radius(proxy, radius);
-
-            MemorySegment originSeg = b3Pos.allocate(temp);
-            b3Pos.x(originSeg, origin.x());
-            b3Pos.y(originSeg, origin.y());
-            b3Pos.z(originSeg, origin.z());
-            MemorySegment trans = b3Vec3.allocate(temp);
-            b3Vec3.x(trans, (float) translation.x());
-            b3Vec3.y(trans, (float) translation.y());
-            b3Vec3.z(trans, (float) translation.z());
+            MemorySegment proxy = shapeProxy(temp, points, radius);
+            MemorySegment originSeg = position(temp, origin);
+            MemorySegment trans = vector(temp, translation);
 
             castHit = null;
             castFraction = 1f;
@@ -704,6 +696,47 @@ public final class B3World implements AutoCloseable {
                     fcn, MemorySegment.NULL);
             return castHit != null ? castHit : new ShapeHit(false, null, origin, Vec3.zero, 1.0);
         }
+    }
+
+    // bodies whose shapes really overlap the proxy, narrow phase and not the broad phase box
+    public List<B3Body> overlapShape(Vec3 origin, List<Vec3> points, float radius, B3Filter filter) {
+        checkThread();
+        overlapHits.clear();
+        try (Arena temp = Arena.ofConfined()) {
+            box3d_h.b3World_OverlapShape(temp, id, position(temp, origin), shapeProxy(temp, points, radius),
+                    queryFilter(temp, filter), overlapStub, MemorySegment.NULL);
+            return new ArrayList<>(overlapHits);
+        }
+    }
+
+    private static MemorySegment shapeProxy(Arena temp, List<Vec3> points, float radius) {
+        MemorySegment array = b3Vec3.allocateArray(points.size(), temp);
+        for (int i = 0; i < points.size(); i++) {
+            b3Vec3.x(b3Vec3.asSlice(array, i), (float) points.get(i).x());
+            b3Vec3.y(b3Vec3.asSlice(array, i), (float) points.get(i).y());
+            b3Vec3.z(b3Vec3.asSlice(array, i), (float) points.get(i).z());
+        }
+        MemorySegment proxy = temp.allocate(b3ShapeProxy.layout());
+        b3ShapeProxy.points(proxy, array);
+        b3ShapeProxy.count(proxy, points.size());
+        b3ShapeProxy.radius(proxy, radius);
+        return proxy;
+    }
+
+    private static MemorySegment position(Arena temp, Vec3 point) {
+        MemorySegment segment = b3Pos.allocate(temp);
+        b3Pos.x(segment, point.x());
+        b3Pos.y(segment, point.y());
+        b3Pos.z(segment, point.z());
+        return segment;
+    }
+
+    private static MemorySegment vector(Arena temp, Vec3 value) {
+        MemorySegment segment = b3Vec3.allocate(temp);
+        b3Vec3.x(segment, (float) value.x());
+        b3Vec3.y(segment, (float) value.y());
+        b3Vec3.z(segment, (float) value.z());
+        return segment;
     }
 
     private ShapeHit castHit;

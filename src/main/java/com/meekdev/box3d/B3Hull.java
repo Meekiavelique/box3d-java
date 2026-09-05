@@ -1,5 +1,7 @@
 package com.meekdev.box3d;
 
+import com.meekdev.box3d.ffi.b3AABB;
+import com.meekdev.box3d.ffi.b3HullData;
 import com.meekdev.box3d.ffi.b3Quat;
 import com.meekdev.box3d.ffi.b3Transform;
 import com.meekdev.box3d.ffi.b3Vec3;
@@ -89,6 +91,21 @@ public final class B3Hull implements AutoCloseable {
 
     public B3Hull scaled(double factor) {
         return transformed(Vec3.zero, Quat.identity, new Vec3(factor, factor, factor));
+    }
+
+    public float[] localBounds() {
+        MemorySegment hull = data().reinterpret(b3HullData.layout().byteSize());
+        MemorySegment box = b3HullData.aabb(hull);
+        MemorySegment lower = b3AABB.lowerBound(box);
+        MemorySegment upper = b3AABB.upperBound(box);
+        return new float[] {
+                b3Vec3.x(lower), b3Vec3.y(lower), b3Vec3.z(lower),
+                b3Vec3.x(upper), b3Vec3.y(upper), b3Vec3.z(upper)
+        };
+    }
+
+    public float volume() {
+        return b3HullData.volume(data().reinterpret(b3HullData.layout().byteSize()));
     }
 
     MemorySegment data() {

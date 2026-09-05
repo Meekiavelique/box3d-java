@@ -81,16 +81,20 @@ def builtLibrary(File root, String stem) {
     return found
 }
 
-// Ninja when it is on PATH because it is much faster, otherwise whatever cmake picks for the
-// platform, which is what makes this work on a Windows runner with no ninja installed
+// Ninja when it is on PATH because it is much faster, otherwise whatever cmake picks. Never on
+// windows: a runner carries both ninja and mingw, and cmake then links against libgcc_s_seh-1,
+// libstdc++-6 and libwinpthread-1, which no ordinary windows machine has. Cmake's own default
+// there is the Visual Studio generator, whose output needs only the msvc runtime.
 def cmakeGenerator() {
     def override = findProperty('cmakeGenerator') ?: System.getenv('CMAKE_GENERATOR')
     if (override) {
         return override == 'default' ? null : override
     }
-    def executable = windows() ? 'ninja.exe' : 'ninja'
+    if (windows()) {
+        return null
+    }
     def onPath = (System.getenv('PATH') ?: '').split(File.pathSeparator).any { entry ->
-        entry && new File(entry, executable).canExecute()
+        entry && new File(entry, 'ninja').canExecute()
     }
     return onPath ? 'Ninja' : null
 }

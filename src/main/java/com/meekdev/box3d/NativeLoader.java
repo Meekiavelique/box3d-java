@@ -7,7 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
-// loads the box3d native lib once per jvm, either from the bkun.box3d.library
+// loads the box3d native lib once per jvm, either from the box3d.library
 // system property or by extracting natives/<os>-<arch>/<libname> off the classpath
 //
 // note: this only satisfies our own System.load call. the jextract bindings in
@@ -18,6 +18,8 @@ import java.nio.file.StandardCopyOption;
 // which can't be changed from inside a running jvm, so the native dir has to be
 // on LD_LIBRARY_PATH before the jvm starts for box3d_h calls to work
 public final class NativeLoader {
+
+    public static final String LIBRARY_PROPERTY = "box3d.library";
 
     private static boolean loaded = false;
     private static boolean vhacdLoaded = false;
@@ -36,7 +38,8 @@ public final class NativeLoader {
             return;
         }
 
-        String propertyPath = System.getProperty("bkun.box3d.library");
+        String propertyPath = System.getProperty(LIBRARY_PROPERTY,
+                System.getProperty("bkun.box3d.library"));
         if (propertyPath != null && !propertyPath.isBlank()) {
             System.load(Path.of(propertyPath).toAbsolutePath().toString());
             // the vhacd lib is expected right next to a hand picked box3d

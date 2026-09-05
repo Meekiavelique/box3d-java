@@ -216,9 +216,8 @@ tasks.register('regenerateBindings', Exec) {
             'native/box3d/include/box3d/box3d.h'
 }
 
-// ship whatever natives have been built so the loader can pull them off the classpath
-jar {
-    from('natives') {
-        into 'natives'
-    }
-}
+// The natives deliberately stay out of the jar. Baking them in means a vendored copy of this
+// library carries whichever platform happened to be built that day, and because NativeLoader
+// resolves natives/<os>-<arch>/ through getResource, that stale copy can win over the one the
+// application shipped. Consumers put the natives on the classpath themselves, or point
+// box3d.library at a file; dev runs get them through the loader path.

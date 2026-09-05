@@ -61,17 +61,22 @@ def sharedLibrary(String stem) {
 // where cmake drops the library depends on the generator - bin/, bin/Release/, or the build root -
 // and on Linux the plain name is a symlink into libbox3d.so.0.1.0, so search then resolve the link
 def builtLibrary(File root, String stem) {
-    def wanted = sharedLibrary(stem)
+    // cmake keeps the lib prefix on windows too, so box3d.dll is written as libbox3d.dll, but
+    // NativeLoader asks for System.mapLibraryName which has no prefix there - accept both
+    def names = [sharedLibrary(stem)]
+    if (windows()) {
+        names << "lib${stem}.dll".toString()
+    }
     def found = null
     if (root.isDirectory()) {
         root.eachFileRecurse { candidate ->
-            if (found == null && candidate.name == wanted && candidate.isFile()) {
+            if (found == null && names.contains(candidate.name) && candidate.isFile()) {
                 found = candidate.canonicalFile
             }
         }
     }
     if (found == null) {
-        throw new GradleException("cmake did not produce $wanted under $root")
+        throw new GradleException("cmake did not produce any of $names under $root")
     }
     return found
 }

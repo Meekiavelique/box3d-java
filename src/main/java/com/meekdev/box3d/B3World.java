@@ -744,8 +744,10 @@ public final class B3World implements AutoCloseable {
 
     public record SensorTouch(B3Body sensor, B3Body visitor) {}
 
+    public record Sensors(List<SensorTouch> begins, List<SensorTouch> ends) {}
+
     // transient sensor begin and end touches from the last step
-    public List<SensorTouch>[] sensorEvents() {
+    public Sensors sensorTouches() {
         checkThread();
         try (Arena temp = Arena.ofConfined()) {
             MemorySegment events = box3d_h.b3World_GetSensorEvents(temp, id);
@@ -770,10 +772,16 @@ public final class B3World implements AutoCloseable {
                         bodyOfShape(b3SensorEndTouchEvent.sensorShapeId(e)),
                         bodyOfShape(b3SensorEndTouchEvent.visitorShapeId(e))));
             }
-            @SuppressWarnings("unchecked")
-            List<SensorTouch>[] result = new List[] {begins, ends};
-            return result;
+            return new Sensors(begins, ends);
         }
+    }
+
+    /** @deprecated use {@link #sensorTouches()}, index 0 is begins and index 1 is ends. */
+    @Deprecated
+    @SuppressWarnings("unchecked")
+    public List<SensorTouch>[] sensorEvents() {
+        Sensors touches = sensorTouches();
+        return new List[] {touches.begins(), touches.ends()};
     }
 
     // joints whose force or torque threshold tripped during the last step

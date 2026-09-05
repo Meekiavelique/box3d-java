@@ -53,9 +53,9 @@ def windows() {
 def sharedLibrary(String stem) {
     def os = System.getProperty('os.name').toLowerCase(Locale.ROOT)
     if (os.contains('win')) {
-        return "${stem}.dll"
+        return "${stem}.dll".toString()
     }
-    return os.contains('mac') ? "lib${stem}.dylib" : "lib${stem}.so"
+    return (os.contains('mac') ? "lib${stem}.dylib" : "lib${stem}.so").toString()
 }
 
 // where cmake drops the library depends on the generator - bin/, bin/Release/, or the build root -

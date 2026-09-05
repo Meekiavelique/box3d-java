@@ -3,6 +3,7 @@ package com.meekdev.box3d;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class B3MoverTest {
@@ -54,6 +55,34 @@ class B3MoverTest {
                 r = mover.move(r.position(), new Vec3(0.3, -0.08, 0));
                 assertTrue(r.grounded());
                 assertTrue(r.position().x() > -4.8);
+            }
+        }
+    }
+
+    @Test
+    void invertedGravityGroundsOnACeiling() {
+        try (B3World world = B3World.create(new Vec3(0, 0, 0))) {
+            B3Body ceiling = world.createBody(B3BodyType.STATIC, new Vec3(0, 2.8, 0));
+            ceiling.addBox(new Vec3(50, 1, 50));
+
+            try (B3Mover mover = new B3Mover(world, 0.4f, 0.9f)) {
+                assertEquals(1.0f, mover.gravitySign());
+
+                B3Mover.MoveResult upright =
+                        mover.move(new Vec3(0, -0.01, 0), new Vec3(1, 0.5, 0));
+                assertFalse(upright.grounded(),
+                        "a ceiling is not ground while gravity pulls down");
+
+                mover.setGravitySign(-1f);
+                assertEquals(-1.0f, mover.gravitySign());
+
+                B3Mover.MoveResult inverted =
+                        mover.move(new Vec3(0, -0.01, 0), new Vec3(1, 0.5, 0));
+                assertTrue(inverted.grounded(), "did not ground on the ceiling");
+                assertTrue(inverted.groundNormal().y() < -0.9,
+                        "ground normal points " + inverted.groundNormal().y());
+                assertTrue(inverted.position().x() > 0.5);
+                assertEquals(0.0, inverted.position().y(), 0.05);
             }
         }
     }

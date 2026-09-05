@@ -43,6 +43,7 @@ public final class B3Mover implements AutoCloseable {
     private final float groundNormalY;
     private final float radius;
     private final float bottomCenterY;
+    private float gravitySign = 1.0f;
     private int planeCount;
     private static final LongPredicate ACCEPT_EVERY_BODY = bodyKey -> true;
 
@@ -125,6 +126,14 @@ public final class B3Mover implements AutoCloseable {
     // ignore this body in every query, use it for the mover's own mirrored capsule
     public void setExcludedBody(B3Body body) {
         this.excludedBody = body == null ? 0 : B3World.bodyKey(body.idSegment());
+    }
+
+    public void setGravitySign(float sign) {
+        this.gravitySign = sign < 0 ? -1.0f : 1.0f;
+    }
+
+    public float gravitySign() {
+        return gravitySign;
     }
 
     public MoveResult move(Vec3 position, Vec3 delta) {
@@ -229,19 +238,20 @@ public final class B3Mover implements AutoCloseable {
                         new Vec3(px + b3Vec3.x(point), py + b3Vec3.y(point), pz + b3Vec3.z(point)),
                         new Vec3(nx, ny, nz)));
 
-                if (ny > groundNormalY && ny > gy) {
+                float facing = ny * gravitySign;
+                if (facing > groundNormalY && facing > gy * gravitySign) {
                     grounded = true;
                     gx = nx;
                     gy = ny;
                     gz = nz;
                     // box3d leaves a slop of encroachment that vanilla's anti clip
                     // rejects, measure it against the ground plane and climb out
-                    float d = ny * bottomCenterY - b3Plane.offset(plane);
+                    float d = facing * bottomCenterY - b3Plane.offset(plane) * gravitySign;
                     lift = Math.max(0, Math.min(radius - d, 0.05f));
                 }
             }
             if (lift > 0.002f) {
-                py += lift;
+                py += lift * gravitySign;
             }
 
             return new MoveResult(new Vec3(px, py, pz),

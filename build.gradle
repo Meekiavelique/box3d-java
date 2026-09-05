@@ -32,12 +32,86 @@ dependencies {
 
 test {
     useJUnitPlatform()
-    systemProperty 'bkun.box3d.library', findProperty('box3dLib') ?: "${projectDir}/natives/linux-x64/libbox3d.so"
+    systemProperty 'bkun.box3d.library', findProperty('box3dLib')
+            ?: "${projectDir}/natives/${nativePlatform()}/${sharedLibrary('box3d')}"
     jvmArgs '--enable-native-access=ALL-UNNAMED'
 }
 
+// <os>-<arch>, the same id Bkun and Gravimity use to find the natives they load
+def nativePlatform() {
+    def os = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    def arch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
+    def name = os.contains('win') ? 'windows' : os.contains('mac') ? 'macos' : 'linux'
+    def bits = arch.contains('aarch64') || arch.contains('arm') ? 'arm64' : 'x64'
+    return "$name-$bits"
+}
+
+def windows() {
+    return System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('win')
+}
+
+def sharedLibrary(String stem) {
+    def os = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    if (os.contains('win')) {
+        return "${stem}.dll"
+    }
+    return os.contains('mac') ? "lib${stem}.dylib" : "lib${stem}.so"
+}
+
+// where cmake drops the library depends on the generator - bin/, bin/Release/, or the build root -
+// and on Linux the plain name is a symlink into libbox3d.so.0.1.0, so search then resolve the link
+def builtLibrary(File root, String stem) {
+    def wanted = sharedLibrary(stem)
+    def found = null
+    if (root.isDirectory()) {
+        root.eachFileRecurse { candidate ->
+            if (found == null && candidate.name == wanted && candidate.isFile()) {
+                found = candidate.canonicalFile
+            }
+        }
+    }
+    if (found == null) {
+        throw new GradleException("cmake did not produce $wanted under $root")
+    }
+    return found
+}
+
+// Ninja when it is on PATH because it is much faster, otherwise whatever cmake picks for the
+// platform, which is what makes this work on a Windows runner with no ninja installed
+def cmakeGenerator() {
+    def override = findProperty('cmakeGenerator') ?: System.getenv('CMAKE_GENERATOR')
+    if (override) {
+        return override == 'default' ? null : override
+    }
+    def executable = windows() ? 'ninja.exe' : 'ninja'
+    def onPath = (System.getenv('PATH') ?: '').split(File.pathSeparator).any { entry ->
+        entry && new File(entry, executable).canExecute()
+    }
+    return onPath ? 'Ninja' : null
+}
+
+def configureCommand(List<String> extra) {
+    def command = ['cmake', '-B', 'build']
+    def generator = cmakeGenerator()
+    if (generator) {
+        command += ['-G', generator]
+    }
+    return command + extra
+}
+
+def jextract() {
+    def configured = findProperty('jextract') ?: System.getenv('JEXTRACT')
+    if (configured) {
+        return configured.toString()
+    }
+    def home = System.getProperty('user.home')
+    return windows()
+            ? "$home/.local/jextract-25/bin/jextract.bat"
+            : "$home/.local/jextract-25/bin/jextract"
+}
+
 def nativeDir = layout.projectDirectory.dir('native/box3d')
-def nativeOut = layout.projectDirectory.dir('natives/linux-x64')
+def nativeOut = layout.projectDirectory.dir("natives/${nativePlatform()}")
 
 // native/box3d is a submodule, so anything left sitting in it is one git clean from gone. ours live
 // in native/rollback and get copied in before cmake runs.
@@ -68,31 +142,33 @@ tasks.register('graftRollbackSources') {
 tasks.register('configureNative', Exec) {
     dependsOn 'graftRollbackSources'
     workingDir nativeDir
-    commandLine 'cmake', '-B', 'build', '-G', 'Ninja',
+    commandLine configureCommand([
             '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=ON',
-            '-DBOX3D_DOUBLE_PRECISION=ON', '-DBOX3D_SAMPLES=OFF', '-DBOX3D_UNIT_TESTS=OFF'
+            '-DBOX3D_DOUBLE_PRECISION=ON', '-DBOX3D_SAMPLES=OFF', '-DBOX3D_UNIT_TESTS=OFF'])
 }
 
 tasks.register('configureVhacd', Exec) {
     workingDir 'native/vhacd'
-    commandLine 'cmake', '-B', 'build', '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release'
+    commandLine configureCommand(['-DCMAKE_BUILD_TYPE=Release'])
 }
 
 tasks.register('buildVhacd', Exec) {
     dependsOn 'configureVhacd'
     workingDir 'native/vhacd'
-    commandLine 'cmake', '--build', 'build'
+    commandLine 'cmake', '--build', 'build', '--config', 'Release'
     doLast {
+        def library = builtLibrary(file('native/vhacd/build'), 'bkunvhacd')
         copy {
-            from 'native/vhacd/build/libbkunvhacd.so'
+            from library
             into nativeOut
+            rename { sharedLibrary('bkunvhacd') }
         }
     }
 }
 
 tasks.register('regenerateVhacdBindings', Exec) {
     workingDir projectDir
-    commandLine "${System.getProperty('user.home')}/.local/jextract-25/bin/jextract",
+    commandLine jextract(),
             '--output', 'src/generated/java',
             '--target-package', 'com.meekdev.box3d.ffi.vhacd',
             '-I', 'native/vhacd',
@@ -102,11 +178,13 @@ tasks.register('regenerateVhacdBindings', Exec) {
 tasks.register('buildNative', Exec) {
     dependsOn 'configureNative'
     workingDir nativeDir
-    commandLine 'cmake', '--build', 'build', '--target', 'box3d'
+    commandLine 'cmake', '--build', 'build', '--target', 'box3d', '--config', 'Release'
     doLast {
+        def library = builtLibrary(file("${nativeDir}/build"), 'box3d')
         copy {
-            from "${nativeDir}/build/bin/libbox3d.so"
+            from library
             into nativeOut
+            rename { sharedLibrary('box3d') }
         }
     }
 }
@@ -115,7 +193,7 @@ tasks.register('buildNative', Exec) {
 tasks.register('regenerateRollbackBindings', Exec) {
     dependsOn 'graftRollbackSources'
     workingDir projectDir
-    commandLine "${System.getProperty('user.home')}/.local/jextract-25/bin/jextract",
+    commandLine jextract(),
             '--output', 'src/generated/java',
             '--target-package', 'com.meekdev.box3d.ffi.rollback',
             '-DBOX3D_DOUBLE_PRECISION',
@@ -125,7 +203,7 @@ tasks.register('regenerateRollbackBindings', Exec) {
 
 tasks.register('regenerateBindings', Exec) {
     workingDir projectDir
-    commandLine "${System.getProperty('user.home')}/.local/jextract-25/bin/jextract",
+    commandLine jextract(),
             '--output', 'src/generated/java',
             '--target-package', 'com.meekdev.box3d.ffi',
             '-DBOX3D_DOUBLE_PRECISION',

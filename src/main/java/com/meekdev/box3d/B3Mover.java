@@ -7,6 +7,7 @@ import com.meekdev.box3d.ffi.b3Plane;
 import com.meekdev.box3d.ffi.b3PlaneResult;
 import com.meekdev.box3d.ffi.b3PlaneResultFcn;
 import com.meekdev.box3d.ffi.b3PlaneSolverResult;
+import com.meekdev.box3d.ffi.b3QueryFilter;
 import com.meekdev.box3d.ffi.b3Pos;
 import com.meekdev.box3d.ffi.b3ShapeId;
 import com.meekdev.box3d.ffi.b3Vec3;
@@ -124,6 +125,12 @@ public final class B3Mover implements AutoCloseable {
     }
 
     // ignore this body in every query, use it for the mover's own mirrored capsule
+    // which shapes the mover collides with and casts against, by category and mask
+    public void setFilter(B3Filter value) {
+        b3QueryFilter.categoryBits(filter, value.categoryBits());
+        b3QueryFilter.maskBits(filter, value.maskBits());
+    }
+
     public void setExcludedBody(B3Body body) {
         this.excludedBody = body == null ? 0 : B3World.bodyKey(body.idSegment());
     }

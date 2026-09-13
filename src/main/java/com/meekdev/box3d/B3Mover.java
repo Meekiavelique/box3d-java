@@ -124,13 +124,13 @@ public final class B3Mover implements AutoCloseable {
         this.bodyFilter = filter == null ? ACCEPT_EVERY_BODY : filter;
     }
 
-    // ignore this body in every query, use it for the mover's own mirrored capsule
     // which shapes the mover collides with and casts against, by category and mask
     public void setFilter(B3Filter value) {
         b3QueryFilter.categoryBits(filter, value.categoryBits());
         b3QueryFilter.maskBits(filter, value.maskBits());
     }
 
+    // ignore this body in every query, use it for the mover's own mirrored capsule
     public void setExcludedBody(B3Body body) {
         this.excludedBody = body == null ? 0 : B3World.bodyKey(body.idSegment());
     }

@@ -61,6 +61,6 @@ a few of box3d's own rules leak through and are good to know. compounds and heig
 
 ## natives
 
-`./gradlew buildNative` builds the vendored box3d submodule with cmake for whatever host you're on. ci does the same across linux, windows and macos and packs all of them into the jar, then `NativeLoader` fishes out the right one at runtime. already have a build lying around? point `bkun.box3d.library` at it and it wins.
+`./gradlew buildNative` builds the vendored box3d submodule with cmake for whatever host you're on. ci does the same across linux, windows and macos and packs all of them into the jar, then `NativeLoader` fishes out the right one at runtime. no mac or windows box around? `./gradlew allNatives` builds the host with cmake and cross builds every other platform with zig (`-Pzig=/path/to/zig` if it is not on PATH). already have a build lying around? point `bkun.box3d.library` at it and it wins.
 
 bumped the submodule, regenerate the bindings with `./gradlew regenerateBindings` and rebuild the native.

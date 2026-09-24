@@ -50,21 +50,20 @@ def windows() {
     return System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('win')
 }
 
-def sharedLibrary(String stem) {
-    def os = System.getProperty('os.name').toLowerCase(Locale.ROOT)
-    if (os.contains('win')) {
+def sharedLibrary(String stem, String platform = nativePlatform()) {
+    if (platform.startsWith('windows')) {
         return "${stem}.dll".toString()
     }
-    return (os.contains('mac') ? "lib${stem}.dylib" : "lib${stem}.so").toString()
+    return (platform.startsWith('macos') ? "lib${stem}.dylib" : "lib${stem}.so").toString()
 }
 
 // where cmake drops the library depends on the generator - bin/, bin/Release/, or the build root -
 // and on Linux the plain name is a symlink into libbox3d.so.0.1.0, so search then resolve the link
-def builtLibrary(File root, String stem) {
+def builtLibrary(File root, String stem, String platform = nativePlatform()) {
     // cmake keeps the lib prefix on windows too, so box3d.dll is written as libbox3d.dll, but
     // NativeLoader asks for System.mapLibraryName which has no prefix there - accept both
-    def names = [sharedLibrary(stem)]
-    if (windows()) {
+    def names = [sharedLibrary(stem, platform)]
+    if (platform.startsWith('windows')) {
         names << "lib${stem}.dll".toString()
     }
     def found = null
@@ -218,6 +217,112 @@ tasks.register('regenerateBindings', Exec) {
             '-DBOX3D_DOUBLE_PRECISION',
             '-I', 'native/box3d/include',
             'native/box3d/include/box3d/box3d.h'
+}
+
+def zig() {
+    def configured = findProperty('zig') ?: System.getenv('ZIG')
+    if (configured) {
+        return configured.toString()
+    }
+    def local = new File(System.getProperty('user.home'), '.local/bin/zig')
+    return local.canExecute() ? local.path : 'zig'
+}
+
+def crossTargets = [
+        'linux-x64'  : [zig: 'x86_64-linux-gnu.2.28', system: 'Linux'],
+        'macos-arm64': [zig: 'aarch64-macos', system: 'Darwin'],
+        'macos-x64'  : [zig: 'x86_64-macos', system: 'Darwin'],
+        'windows-x64': [zig: 'x86_64-windows-gnu', system: 'Windows'],
+]
+
+crossTargets.each { platform, target ->
+    def id = platform.split('-').collect { it.capitalize() }.join()
+    def root = layout.buildDirectory.dir("cross/${platform}").get().asFile
+    def tools = new File(root, 'tools')
+    def out = layout.projectDirectory.dir("natives/${platform}")
+
+    def toolchain = tasks.register("zigToolchain${id}") {
+        outputs.dir tools
+        doLast {
+            if (windows()) {
+                throw new GradleException('cross building the natives needs a unix shell for the zig wrappers')
+            }
+            tools.mkdirs()
+            def extra = target.system == 'Windows' ? " -I${file('native/cross/include')}" : ''
+            [cc: "cc -target ${target.zig}${extra}", 'c++': "c++ -target ${target.zig}${extra}",
+             ar: 'ar', ranlib: 'ranlib'].each { name, command ->
+                def wrapper = new File(tools, name)
+                wrapper.text = "#!/bin/sh\nexec '${zig()}' ${command} \"\$@\"\n"
+                wrapper.setExecutable(true)
+            }
+        }
+    }
+
+    def crossConfigure = { String source, String build, List<String> extra ->
+        def command = ['cmake', '-S', file(source).path, '-B', new File(root, build).path]
+        def generator = cmakeGenerator()
+        if (generator) {
+            command += ['-G', generator]
+        }
+        return command + [
+                "-DCMAKE_SYSTEM_NAME=${target.system}".toString(),
+                "-DCMAKE_C_COMPILER=${new File(tools, 'cc')}".toString(),
+                "-DCMAKE_CXX_COMPILER=${new File(tools, 'c++')}".toString(),
+                "-DCMAKE_AR=${new File(tools, 'ar')}".toString(),
+                "-DCMAKE_RANLIB=${new File(tools, 'ranlib')}".toString(),
+                '-DCMAKE_SHARED_LINKER_FLAGS=-s', '-DCMAKE_BUILD_TYPE=Release'] + extra
+    }
+
+    def configureBox3d = tasks.register("configureNative${id}", Exec) {
+        dependsOn 'graftRollbackSources', toolchain
+        commandLine crossConfigure(nativeDir.asFile.path, 'box3d', [
+                '-DBUILD_SHARED_LIBS=ON', '-DBOX3D_DOUBLE_PRECISION=ON',
+                '-DBOX3D_SAMPLES=OFF', '-DBOX3D_UNIT_TESTS=OFF'])
+    }
+
+    def buildBox3d = tasks.register("buildNative${id}", Exec) {
+        dependsOn configureBox3d
+        commandLine 'cmake', '--build', new File(root, 'box3d').path, '--target', 'box3d', '--config', 'Release'
+        doLast {
+            copy {
+                from builtLibrary(new File(root, 'box3d'), 'box3d', platform)
+                into out
+                rename { sharedLibrary('box3d', platform) }
+            }
+        }
+    }
+
+    def configureVhacd = tasks.register("configureVhacd${id}", Exec) {
+        dependsOn toolchain
+        commandLine crossConfigure('native/vhacd', 'vhacd', [])
+    }
+
+    def buildVhacd = tasks.register("buildVhacd${id}", Exec) {
+        dependsOn configureVhacd
+        commandLine 'cmake', '--build', new File(root, 'vhacd').path, '--config', 'Release'
+        doLast {
+            copy {
+                from builtLibrary(new File(root, 'vhacd'), 'bkunvhacd', platform)
+                into out
+                rename { sharedLibrary('bkunvhacd', platform) }
+            }
+        }
+    }
+
+    tasks.register("crossNatives${id}") {
+        group = 'build'
+        description = "Cross builds the ${platform} natives with zig"
+        dependsOn buildBox3d, buildVhacd
+    }
+}
+
+tasks.register('allNatives') {
+    group = 'build'
+    description = 'Builds the host natives with cmake and every other platform with zig'
+    dependsOn 'buildNative', 'buildVhacd'
+    crossTargets.keySet().findAll { it != nativePlatform() }.each { platform ->
+        dependsOn "crossNatives${platform.split('-').collect { it.capitalize() }.join()}"
+    }
 }
 
 // The natives deliberately stay out of the jar. Baking them in means a vendored copy of this

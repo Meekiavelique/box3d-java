@@ -230,6 +230,7 @@ def zig() {
 
 def crossTargets = [
         'linux-x64'  : [zig: 'x86_64-linux-gnu.2.28', system: 'Linux'],
+        'linux-arm64': [zig: 'aarch64-linux-gnu.2.28', system: 'Linux'],
         'macos-arm64': [zig: 'aarch64-macos', system: 'Darwin'],
         'macos-x64'  : [zig: 'x86_64-macos', system: 'Darwin'],
         'windows-x64': [zig: 'x86_64-windows-gnu', system: 'Windows'],
@@ -319,8 +320,12 @@ crossTargets.each { platform, target ->
 tasks.register('allNatives') {
     group = 'build'
     description = 'Builds the host natives with cmake and every other platform with zig'
-    dependsOn 'buildNative', 'buildVhacd'
-    crossTargets.keySet().findAll { it != nativePlatform() }.each { platform ->
+    // a host cmake build on linux needs the build machine's glibc, so linux always goes through zig
+    def host = nativePlatform().startsWith('linux') ? null : nativePlatform()
+    if (host) {
+        dependsOn 'buildNative', 'buildVhacd'
+    }
+    crossTargets.keySet().findAll { it != host }.each { platform ->
         dependsOn "crossNatives${platform.split('-').collect { it.capitalize() }.join()}"
     }
 }

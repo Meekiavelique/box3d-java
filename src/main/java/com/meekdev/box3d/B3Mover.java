@@ -28,6 +28,7 @@ public final class B3Mover implements AutoCloseable {
     private static final int PLANE_CAPACITY = 16;
     private static final int MAX_ITERATIONS = 5;
     private static final float TOLERANCE = 0.01f;
+    private static final float STEP_CLEAR = 0.99f;
     private static final float MAX_DEPENETRATION = 0.25f;
 
     private final B3World world;
@@ -196,13 +197,18 @@ public final class B3Mover implements AutoCloseable {
                     float fwdFrac = cast(px, py + up, pz, tx, 0, tz);
                     float fx = fwdFrac * tx;
                     float fz = fwdFrac * tz;
-                    if (fx * fx + fz * fz > TOLERANCE * TOLERANCE) {
+                    // only a ledge the body clears and then stands on counts, else it perches on the edge of anything taller
+                    if (fwdFrac > STEP_CLEAR && fx * fx + fz * fz > TOLERANCE * TOLERANCE) {
                         double sx = px + fx;
                         double sz = pz + fz;
                         float downFrac = cast(sx, py + up, sz, 0, -up, 0);
-                        px = sx;
-                        py = py + up - downFrac * up;
-                        pz = sz;
+                        double sy = py + up - downFrac * up;
+                        collide(sx, sy, sz);
+                        if (downFrac < 1f && hasGroundPlane()) {
+                            px = sx;
+                            py = sy;
+                            pz = sz;
+                        }
                     }
                 }
             }
